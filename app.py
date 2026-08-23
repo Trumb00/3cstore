@@ -129,7 +129,6 @@ with tab_listino:
                 "Prezzo (€)": prezzo_netto,
                 "IVA (%)": iva_perc,
                 "Prezzo + IVA (€)": prezzo_ivato, # NUOVA COLONNA CALCOLATA
-                "Scelto": row.get("is_scelto", False),
                 "Attivo": row.get("is_active", True)
             }
             # Impostiamo True/False per le 14 colonne
@@ -141,7 +140,7 @@ with tab_listino:
     colonne_base = [
         "listino_id", "ingrediente_id", "Generico", "Dettaglio (Variante)", "Nome in Ricetta", 
         "UM Ricetta", "Categoria", "Fornitore", "Nome Commerciale", "Peso Acquisto (g/ml)", 
-        "Prezzo (€)", "IVA (%)", "Prezzo + IVA (€)", "Scelto", "Attivo"
+        "Prezzo (€)", "IVA (%)", "Prezzo + IVA (€)", "Attivo"
     ]
     df_listino = pd.DataFrame(dati_piatti) if dati_piatti else pd.DataFrame(columns=colonne_base + ALLERGENI_LIST)
     
@@ -212,7 +211,6 @@ with tab_listino:
                         "peso_unita_acquisto_g": riga.get("Peso Acquisto (g/ml)", 1000),
                         "prezzo_acquisto": riga.get("Prezzo (€)", 0.0),
                         "iva": riga.get("IVA (%)", 0),
-                        "is_scelto": riga.get("Scelto", False),
                         "is_active": riga.get("Attivo", True)
                     }
                     supabase.table("listino_acquisti").insert(nuovo_prezzo).execute()
@@ -230,7 +228,6 @@ with tab_listino:
                     if "Peso Acquisto (g/ml)" in updates: update_listino["peso_unita_acquisto_g"] = updates["Peso Acquisto (g/ml)"]
                     if "Prezzo (€)" in updates: update_listino["prezzo_acquisto"] = updates["Prezzo (€)"]
                     if "IVA (%)" in updates: update_listino["iva"] = updates["IVA (%)"]
-                    if "Scelto" in updates: update_listino["is_scelto"] = updates["Scelto"]
                     if "Attivo" in updates: update_listino["is_active"] = updates["Attivo"]
                     
                     if "UM Ricetta" in updates: update_ingrediente["um_ricetta"] = updates["UM Ricetta"]
