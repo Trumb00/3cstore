@@ -22,14 +22,6 @@ def init_admin_connection() -> Client:
 
 supabase_admin = init_admin_connection()
 
-# --- VERIFICA RUOLO UTENTE LOGGATO ---
-# Da inserire SUBITO DOPO il blocco del Login e prima di st.title
-ruolo_utente = "visitatore" # Default
-if st.session_state.user:
-    res_ruolo = supabase.table("ruoli_utenti").select("ruolo").eq("user_id", st.session_state.user.id).execute()
-    if res_ruolo.data:
-        ruolo_utente = res_ruolo.data[0]["ruolo"]
-
 # --- SISTEMA DI LOGIN ---
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -54,6 +46,14 @@ with st.sidebar:
         supabase.auth.sign_out()
         st.session_state.user = None
         st.rerun()
+
+# --- VERIFICA RUOLO UTENTE LOGGATO ---
+# Da inserire SUBITO DOPO il blocco del Login e prima di st.title
+ruolo_utente = "visitatore" # Default
+if st.session_state.user:
+    res_ruolo = supabase.table("ruoli_utenti").select("ruolo").eq("user_id", st.session_state.user.id).execute()
+    if res_ruolo.data:
+        ruolo_utente = res_ruolo.data[0]["ruolo"]
 
 # --- INTERFACCIA PRINCIPALE ---
 st.title("🍷 Gestionale Osteria")
