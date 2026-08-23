@@ -111,6 +111,10 @@ with tab_listino:
             if not isinstance(allergeni_db, list):
                 allergeni_db = []
             
+            prezzo_netto = row.get("prezzo_acquisto", 0.0)
+            iva_perc = row.get("iva", 0)
+            prezzo_ivato = prezzo_netto * (1 + iva_perc / 100)
+            
             riga = {
                 "listino_id": row.get("id"),
                 "ingrediente_id": ing.get("id"),
@@ -122,8 +126,9 @@ with tab_listino:
                 "Fornitore": forn.get("nome", ""),
                 "Nome Commerciale": row.get("nome_specifico_prodotto", ""),
                 "Peso Acquisto (g/ml)": row.get("peso_unita_acquisto_g", 0),
-                "Prezzo (€)": row.get("prezzo_acquisto", 0.0),
-                "IVA (%)": row.get("iva", 0),
+                "Prezzo (€)": prezzo_netto,
+                "IVA (%)": iva_perc,
+                "Prezzo + IVA (€)": prezzo_ivato, # NUOVA COLONNA CALCOLATA
                 "Scelto": row.get("is_scelto", False),
                 "Attivo": row.get("is_active", True)
             }
@@ -136,7 +141,7 @@ with tab_listino:
     colonne_base = [
         "listino_id", "ingrediente_id", "Generico", "Dettaglio (Variante)", "Nome in Ricetta", 
         "UM Ricetta", "Categoria", "Fornitore", "Nome Commerciale", "Peso Acquisto (g/ml)", 
-        "Prezzo (€)", "IVA (%)", "Scelto", "Attivo"
+        "Prezzo (€)", "IVA (%)", "Prezzo + IVA (€)", "Scelto", "Attivo"
     ]
     df_listino = pd.DataFrame(dati_piatti) if dati_piatti else pd.DataFrame(columns=colonne_base + ALLERGENI_LIST)
     
@@ -153,6 +158,8 @@ with tab_listino:
         "Fornitore": st.column_config.SelectboxColumn("Fornitore", options=lista_nomi_fornitori),
         "Peso Acquisto (g/ml)": st.column_config.NumberColumn("Peso (g/ml)", min_value=0),
         "Prezzo (€)": st.column_config.NumberColumn("Prezzo (€)", format="%.2f"),
+        "IVA (%)": st.column_config.NumberColumn("IVA (%)", min_value=0, max_value=100, format="%d"),
+        "Prezzo + IVA (€)": st.column_config.NumberColumn("Prezzo + IVA (€)", format="%.2f", disabled=True),
         "Attivo": st.column_config.CheckboxColumn("Attivo"),
     }
     # Aggiungiamo automaticamente le 14 checkbox degli allergeni alla fine
