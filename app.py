@@ -58,7 +58,7 @@ if st.session_state.user:
 # --- INTERFACCIA PRINCIPALE ---
 st.title("🍷 Gestionale Osteria")
 
-tab_listino, tab_fornitori, tab_ricettario, tab_impostazioni, tab_staff = st.tabs(["🛒 Listino", "🚚 Fornitori", "📖 Ricettario", "⚙️ Impostazioni", "👥 Staff"])
+tab_listino, tab_vini, tab_fornitori, tab_ricettario, tab_impostazioni, tab_staff = st.tabs(["🛒 Listino (Cibo)", "🍷 Cantina Vini", "🚚 Fornitori", "📖 Ricettario", "⚙️ Impostazioni", "👥 Staff"])
 
 # --- SCHEDA LISTINO ACQUISTI (LA GRIGLIA PRINCIPALE) ---
 with tab_listino:
@@ -260,6 +260,168 @@ with tab_listino:
         except Exception as e:
             st.error(f"Si è verificato un errore durante il salvataggio: {e}")
 
+# --- SCHEDA CANTINA VINI ---
+with tab_vini:
+    st.subheader("🍷 Gestione Cantina e Carta dei Vini")
+    st.markdown("Aggiungi le referenze della cantina. Questi prodotti non finiranno nel calcolatore del Ricettario, ma ti aiuteranno a monitorare il costo di bottiglie e calici.")
+    
+    mostra_inattivi_vini = st.checkbox("👁️ Mostra vini esauriti/disattivati", value=False)
+    
+    categorie_vino = ["Bianco", "Rosso", "Bollicine", "Orange/Macerato", "Dolce/Passito", "Sfuso"]
+    
+    # 1. Recuperiamo Fornitori e Listino Vini
+    res_forn_vini = supabase.table("fornitori").select("id, nome").eq("is_active", True).execute()
+    fornitori_dict_vini = {f["nome"]: f["id"] for f in res_forn_vini.data} if res_forn_vini.data else {}
+    lista_nomi_fornitori_vini = list(fornitori_dict_vini.keys())
+    
+    query_vini = """
+        id, prezzo_acquisto, peso_unita_acquisto_g, iva, is_active, nome_specifico_prodotto,
+        ingredienti!inner (id, nome_generico, dettaglio_variante, um_ricetta, categoria, is_wine),
+        fornitori (id, nome)
+    """
+    # Filtriamo SOLO is_wine = True
+    res_vini = supabase.table("listino_acquisti").select(query_vini).eq("ingredienti.is_wine", True).execute()
+    
+    dati_vini = []
+    if res_vini.data:
+        for row in res_vini.data:
+            ing = row.get("ingredienti", {}) or {}
+            forn = row.get("fornitori", {}) or {}
+            
+            gen = ing.get("nome_generico", "")
+            dett = ing.get("dettaglio_variante", "")
+            
+            prezzo_netto = float(row.get("prezzo_acquisto", 0.0))
+            iva_perc = float(row.get("iva", 0))
+            prezzo_ivato = prezzo_netto * (1 + iva_perc / 100)
+            
+            # Calcolo automatico costo al calice (Stimando 6 calici da una bottiglia standard da 0.75L)
+            formato = ing.get("um_ricetta", "Bottiglia 0.75L")
+            costo_calice = prezzo_netto / 6 if formato == "Bottiglia 0.75L" else 0.0
+            
+            dati_vini.append({
+                "listino_id": row.get("id"),
+                "ingrediente_id": ing.get("id"),
+                "Nome Vino (Vitigno/Uvaggio)": gen,
+                "Cantina & Annata": dett,
+                "Formato": formato,
+                "Categoria": ing.get("categoria", "Bianco"),
+                "Fornitore": forn.get("nome", ""),
+                "Prezzo Bottiglia Netto (€)": prezzo_netto,
+                "Costo Base 1 Calice (€)": costo_calice,
+                "IVA (%)": iva_perc,
+                "Prezzo Ivato (€)": prezzo_ivato,
+                "Attivo": row.get("is_active", True)
+            })
+            
+    df_vini = pd.DataFrame(dati_vini) if dati_vini else pd.DataFrame(columns=[
+        "listino_id", "ingrediente_id", "Nome Vino (Vitigno/Uvaggio)", "Cantina & Annata", 
+        "Formato", "Categoria", "Fornitore", "Prezzo Bottiglia Netto (€)", "Costo Base 1 Calice (€)", "IVA (%)", "Prezzo Ivato (€)", "Attivo"
+    ])
+    
+    if not df_vini.empty and not mostra_inattivi_vini:
+        df_vini = df_vini[df_vini["Attivo"] == True].reset_index(drop=True)
+        
+    col_config_vini = {
+        "listino_id": None, 
+        "ingrediente_id": None, 
+        "Nome Vino (Vitigno/Uvaggio)": st.column_config.TextColumn("Nome Vino (es. Refosco)", required=True), 
+        "Cantina & Annata": st.column_config.TextColumn("Cantina & Annata", required=True), 
+        "Formato": st.column_config.SelectboxColumn("Formato", options=["Bottiglia 0.75L", "Magnum 1.5L", "Bag in Box 5L", "Fusto"], required=True),
+        "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorie_vino, required=True),
+        "Fornitore": st.column_config.SelectboxColumn("Fornitore", options=lista_nomi_fornitori_vini),
+        "Prezzo Bottiglia Netto (€)": st.column_config.NumberColumn("Costo Netto (€)", format="%.2f"),
+        "Costo Base 1 Calice (€)": st.column_config.NumberColumn("Costo 1 Calice (Stimato)", format="%.2f", disabled=True),
+        "IVA (%)": st.column_config.NumberColumn("IVA (%)", min_value=0, max_value=100, format="%d"),
+        "Prezzo Ivato (€)": st.column_config.NumberColumn("Costo Ivato (€)", format="%.2f", disabled=True),
+        "Attivo": st.column_config.CheckboxColumn("Attivo (In Carta)"),
+    }
+    
+    edited_vini = st.data_editor(
+        df_vini,
+        column_config=col_config_vini,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="vini_editor"
+    )
+    
+    if st.button("💾 Salva Cantina", type="primary"):
+        changes = st.session_state["vini_editor"]
+        try:
+            # INSERIMENTI
+            if changes.get("added_rows"):
+                for riga in changes["added_rows"]:
+                    gen = str(riga.get("Nome Vino (Vitigno/Uvaggio)", "")).strip().title()
+                    dett = str(riga.get("Cantina & Annata", "")).strip().title()
+                    nome_forn = riga.get("Fornitore")
+                    
+                    if not gen or not nome_forn: continue
+                    forn_id = fornitori_dict_vini.get(nome_forn)
+                    
+                    # Controlliamo se il vino esiste già
+                    check_ing = supabase.table("ingredienti").select("id").eq("nome_generico", gen).eq("dettaglio_variante", dett).eq("is_wine", True).execute()
+                    
+                    if check_ing.data:
+                        ing_id = check_ing.data[0]["id"]
+                    else:
+                        nuovo_ing = {
+                            "nome_generico": gen,
+                            "dettaglio_variante": dett,
+                            "um_ricetta": riga.get("Formato", "Bottiglia 0.75L"),
+                            "categoria": riga.get("Categoria", "Bianco"),
+                            "allergeni": ["Anidride solforosa"], # I vini contengono praticamente sempre solfiti
+                            "is_wine": True # IL FLAG FONDAMENTALE
+                        }
+                        res_ing = supabase.table("ingredienti").insert(nuovo_ing).execute()
+                        ing_id = res_ing.data[0]["id"]
+                    
+                    nuovo_prezzo = {
+                        "ingrediente_id": ing_id,
+                        "fornitore_id": forn_id,
+                        "nome_specifico_prodotto": f"{gen} - {dett}",
+                        "peso_unita_acquisto_g": 750 if riga.get("Formato") == "Bottiglia 0.75L" else 0,
+                        "prezzo_acquisto": riga.get("Prezzo Bottiglia Netto (€)", 0.0),
+                        "iva": riga.get("IVA (%)", 22),
+                        "is_active": riga.get("Attivo", True)
+                    }
+                    supabase.table("listino_acquisti").insert(nuovo_prezzo).execute()
+
+            # MODIFICHE
+            if changes.get("edited_rows"):
+                for index, updates in changes["edited_rows"].items():
+                    row_id = df_vini.iloc[index]["listino_id"]
+                    ing_id = df_vini.iloc[index]["ingrediente_id"]
+                    
+                    upd_listino = {}
+                    upd_ingrediente = {}
+                    
+                    if "Fornitore" in updates: upd_listino["fornitore_id"] = fornitori_dict_vini.get(updates["Fornitore"])
+                    if "Prezzo Bottiglia Netto (€)" in updates: upd_listino["prezzo_acquisto"] = updates["Prezzo Bottiglia Netto (€)"]
+                    if "IVA (%)" in updates: upd_listino["iva"] = updates["IVA (%)"]
+                    if "Attivo" in updates: upd_listino["is_active"] = updates["Attivo"]
+                    
+                    if "Nome Vino (Vitigno/Uvaggio)" in updates: upd_ingrediente["nome_generico"] = updates["Nome Vino (Vitigno/Uvaggio)"]
+                    if "Cantina & Annata" in updates: upd_ingrediente["dettaglio_variante"] = updates["Cantina & Annata"]
+                    if "Formato" in updates: 
+                        upd_ingrediente["um_ricetta"] = updates["Formato"]
+                        upd_listino["peso_unita_acquisto_g"] = 750 if updates["Formato"] == "Bottiglia 0.75L" else 0
+                    if "Categoria" in updates: upd_ingrediente["categoria"] = updates["Categoria"]
+                    
+                    if upd_listino: supabase.table("listino_acquisti").update(upd_listino).eq("id", row_id).execute()
+                    if upd_ingrediente: supabase.table("ingredienti").update(upd_ingrediente).eq("id", ing_id).execute()
+
+            # ELIMINAZIONI (Soft Delete)
+            if changes.get("deleted_rows"):
+                for index in changes["deleted_rows"]:
+                    row_id = df_vini.iloc[index]["listino_id"]
+                    supabase.table("listino_acquisti").update({"is_active": False}).eq("id", row_id).execute()
+
+            st.success("Cantina aggiornata con successo!")
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Errore: {e}")
+            
 # --- SCHEDA FORNITORI (Il codice che avevamo scritto nello step precedente) ---
 # --- SCHEDA FORNITORI ---
 with tab_fornitori:
