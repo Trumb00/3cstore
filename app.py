@@ -40,7 +40,7 @@ with st.sidebar:
 # --- INTERFACCIA PRINCIPALE ---
 st.title("🍷 Gestionale Osteria")
 
-tab_listino, tab_fornitori, tab_ricettario = st.tabs(["🛒 Listino Acquisti", "🚚 Fornitori", "📖 Ricettario"])
+tab_listino, tab_fornitori, tab_ricettario, tab_impostazioni = st.tabs(["🛒 Listino", "🚚 Fornitori", "📖 Ricettario", "⚙️ Impostazioni"])
 
 # --- SCHEDA LISTINO ACQUISTI (LA GRIGLIA PRINCIPALE) ---
 with tab_listino:
@@ -224,3 +224,84 @@ with tab_fornitori:
 # --- SCHEDA RICETTARIO ---
 with tab_ricettario:
     st.subheader("Modulo Ricettario")
+
+# --- SCHEDA IMPOSTAZIONI (CONVERSIONI) ---
+with tab_impostazioni:
+    st.subheader("Conversione Unità di Misura")
+    st.markdown("Imposta i moltiplicatori per convertire liquidi (ml/L) o pezzi (pz) in grammi per il calcolo preciso del food cost.")
+    st.info("💡 **Esempi pratici:**\n- L'Olio EVO ha un peso specifico di circa 0.916. Quindi: da `ml` a `g` -> **0.916**\n- Il Latte ha un peso specifico di 1.03. Quindi: da `ml` a `g` -> **1.03**\n- Un Uovo intero pesa circa 50 grammi. Quindi: da `pz` a `g` -> **50.0**")
+    
+    # 1. Recupero dati
+    res_conv = supabase.table("conversioni_misura").select("*").execute()
+    
+    if res_conv.data:
+        df_conv = pd.DataFrame(res_conv.data)
+    else:
+        df_conv = pd.DataFrame(columns=["id", "ingrediente_generico", "da_um", "a_um", "moltiplicatore"])
+        
+    # 2. Griglia interattiva
+    edited_conv = st.data_editor(
+        df_conv,
+        column_config={
+            "id": None, 
+            "created_at": None,
+            "ingrediente_generico": st.column_config.TextColumn("Ingrediente (Generico)", required=True, help="Es: Latte, Olio EVO, Uova"),
+            "da_um": st.column_config.SelectboxColumn("Da (UM Ricetta)", options=["ml", "L", "pz"], required=True),
+            "a_um": st.column_config.TextColumn("A (UM Magazzino)", disabled=True, default="g"),
+            "moltiplicatore": st.column_config.NumberColumn("Moltiplicatore", min_value=0.0001, format="%.4f", required=True)
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        key="conv_editor"
+    )
+    
+    # 3. Logica di salvataggio
+    if st.button("💾 Salva Conversioni", type="primary"):
+        changes = st.session_state["conv_editor"]
+        
+        try:
+            # --- A. Nuove righe ---
+            if changes.get("added_rows"):
+                nuove_conv = []
+                for riga in changes["added_rows"]:
+                    ing = str(riga.get("ingrediente_generico", "")).strip().title()
+                    da = riga.get("da_um")
+                    molt = riga.get("moltiplicatore")
+                    
+                    if ing and da and molt:
+                        nuove_conv.append({
+                            "ingrediente_generico": ing,
+                            "da_um": da,
+                            "a_um": "g",
+                            "moltiplicatore": molt
+                        })
+                if nuove_conv:
+                    supabase.table("conversioni_misura").insert(nuove_conv).execute()
+            
+            # --- B. Modifiche ---
+            if changes.get("edited_rows"):
+                for index, updates in changes["edited_rows"].items():
+                    row_id = df_conv.iloc[index]["id"]
+                    update_data = {}
+                    
+                    if "ingrediente_generico" in updates: 
+                        update_data["ingrediente_generico"] = str(updates["ingrediente_generico"]).strip().title()
+                    if "da_um" in updates: 
+                        update_data["da_um"] = updates["da_um"]
+                    if "moltiplicatore" in updates: 
+                        update_data["moltiplicatore"] = updates["moltiplicatore"]
+                        
+                    if update_data:
+                        supabase.table("conversioni_misura").update(update_data).eq("id", row_id).execute()
+                        
+            # --- C. Eliminazioni definitive ---
+            if changes.get("deleted_rows"):
+                for index in changes["deleted_rows"]:
+                    row_id = df_conv.iloc[index]["id"]
+                    supabase.table("conversioni_misura").delete().eq("id", row_id).execute()
+
+            st.success("Impostazioni di conversione aggiornate!")
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Errore durante il salvataggio delle conversioni: {e}")
