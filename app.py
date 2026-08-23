@@ -610,17 +610,15 @@ with tab_ricettario:
             
 # --- SCHEDA IMPOSTAZIONI (CONVERSIONI) ---
 with tab_impostazioni:
-    st.subheader("Conversione Unità di Misura")
-    st.markdown("Imposta i moltiplicatori per convertire liquidi (ml/L) o pezzi (pz) in grammi per il calcolo preciso del food cost.")
-    st.info("💡 **Esempi pratici:**\n- L'Olio EVO ha un peso specifico di circa 0.916. Quindi: da `ml` a `g` -> **0.916**\n- Il Latte ha un peso specifico di 1.03. Quindi: da `ml` a `g` -> **1.03**\n- Un Uovo intero pesa circa 50 grammi. Quindi: da `pz` a `g` -> **50.0**")
+    st.subheader("Conversione Unità di Misura (Da Acquisto a Ricetta)")
+    st.markdown("Imposta i moltiplicatori per convertire le unità di acquisto (liquidi o pezzi) nei grammi che verranno poi usati in modo fisso nel ricettario.")
+    st.info("💡 **Esempi pratici (Per calcolare il costo al grammo):**\n- Se acquisti l'Olio EVO in `L` (Litri) e 1 litro pesa 916 grammi: da `L` a `g` -> Moltiplicatore **916.0**\n- Se acquisti l'Olio EVO in `ml` (Millilitri): da `ml` a `g` -> Moltiplicatore **0.916**\n- Se acquisti le Uova in `pz` (Pezzi) e un uovo pesa 50g: da `pz` a `g` -> Moltiplicatore **50.0**")
     
     # 1. Recupero dati (Conversioni e Lista Ingredienti)
     res_conv = supabase.table("conversioni_misura").select("*").execute()
     
-    # NOVITÀ: Peschiamo gli ingredienti generici esistenti (escludiamo i vini per pulizia)
     res_ing = supabase.table("ingredienti").select("nome_generico").eq("is_wine", False).execute()
     
-    # Creiamo una lista unica di nomi generici (usiamo un set per eliminare i duplicati)
     lista_ingredienti_generici = []
     if res_ing.data:
         lista_ingredienti_generici = sorted(list(set([ing["nome_generico"] for ing in res_ing.data])))
@@ -630,21 +628,21 @@ with tab_impostazioni:
     else:
         df_conv = pd.DataFrame(columns=["id", "ingrediente_generico", "da_um", "a_um", "moltiplicatore"])
         
-    # 2. Griglia interattiva AGGIORNATA
+    # 2. Griglia interattiva AGGIORNATA NELLE ETICHETTE
     edited_conv = st.data_editor(
         df_conv,
         column_config={
             "id": None, 
             "created_at": None,
-            # NOVITÀ: Ora è una Selectbox popolata con i dati del database
             "ingrediente_generico": st.column_config.SelectboxColumn(
                 "Ingrediente (Generico)", 
                 options=lista_ingredienti_generici, 
                 required=True, 
                 help="Seleziona l'ingrediente dal magazzino"
             ),
-            "da_um": st.column_config.SelectboxColumn("Da (UM Ricetta)", options=["ml", "L", "pz"], required=True),
-            "a_um": st.column_config.TextColumn("A (UM Magazzino)", disabled=True, default="g"),
+            # ETICHETTE CORRETTE: Da UM Acquisto -> A Grammi Ricetta
+            "da_um": st.column_config.SelectboxColumn("Da (UM Acquisto)", options=["ml", "L", "pz"], required=True),
+            "a_um": st.column_config.TextColumn("A (Grammi in Ricetta)", disabled=True, default="g"),
             "moltiplicatore": st.column_config.NumberColumn("Moltiplicatore", min_value=0.0001, format="%.4f", required=True)
         },
         num_rows="dynamic",
@@ -657,7 +655,6 @@ with tab_impostazioni:
         changes = st.session_state["conv_editor"]
         
         try:
-            # --- A. Nuove righe ---
             if changes.get("added_rows"):
                 nuove_conv = []
                 for riga in changes["added_rows"]:
@@ -675,7 +672,6 @@ with tab_impostazioni:
                 if nuove_conv:
                     supabase.table("conversioni_misura").insert(nuove_conv).execute()
             
-            # --- B. Modifiche ---
             if changes.get("edited_rows"):
                 for index, updates in changes["edited_rows"].items():
                     row_id = df_conv.iloc[index]["id"]
@@ -691,7 +687,6 @@ with tab_impostazioni:
                     if update_data:
                         supabase.table("conversioni_misura").update(update_data).eq("id", row_id).execute()
                         
-            # --- C. Eliminazioni definitive ---
             if changes.get("deleted_rows"):
                 for index in changes["deleted_rows"]:
                     row_id = df_conv.iloc[index]["id"]
