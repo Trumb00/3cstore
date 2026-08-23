@@ -114,6 +114,16 @@ with tab_listino:
         # Teniamo solo quelli attivi e resettiamo l'indice (fondamentale per evitare errori nell'editor)
         df_listino = df_listino[df_listino["Attivo"] == True].reset_index(drop=True)
     
+    # Definiamo la lista delle categorie dall'immagine
+    categorie_predefinite = [
+        "Prodotti secchi", 
+        "Prodotti freschi", 
+        "Latticini", 
+        "Confezionati", 
+        "Verdure", 
+        "Preparazioni"
+    ]
+
     # 4. Renderizziamo la Griglia Dati
     edited_listino = st.data_editor(
         df_listino,
@@ -122,6 +132,8 @@ with tab_listino:
             "ingrediente_id": None, 
             "Nome in Ricetta": st.column_config.TextColumn("🔗 Nome in Ricetta", disabled=True), 
             "UM Ricetta": st.column_config.SelectboxColumn("UM", options=["g", "Kg", "ml", "L", "pz"]),
+            # AGGIUNTO IL MENU A TENDINA PER LA CATEGORIA:
+            "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorie_predefinite, required=True),
             "Fornitore": st.column_config.SelectboxColumn("Fornitore", options=lista_nomi_fornitori),
             "Peso Acquisto (g/ml)": st.column_config.NumberColumn("Peso (g/ml)", min_value=0),
             "Prezzo (€)": st.column_config.NumberColumn("Prezzo (€)", format="%.2f"),
