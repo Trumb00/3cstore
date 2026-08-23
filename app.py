@@ -1,3 +1,47 @@
+import streamlit as st
+from supabase import create_client, Client
+import pandas as pd
+
+st.set_page_config(page_title="Gestionale Osteria", page_icon="🍷", layout="wide")
+
+@st.cache_resource
+def init_connection() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
+
+# --- SISTEMA DI LOGIN ---
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+if not st.session_state.user:
+    st.title("🔒 Accesso Richiesto")
+    with st.form("login_form"):
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Log In"):
+            try:
+                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                st.session_state.user = res.user
+                st.rerun()
+            except Exception as e:
+                st.error("Credenziali errate.")
+    st.stop()
+
+with st.sidebar:
+    st.write(f"Utente: {st.session_state.user.email}")
+    if st.button("Log Out"):
+        supabase.auth.sign_out()
+        st.session_state.user = None
+        st.rerun()
+
+# --- INTERFACCIA PRINCIPALE ---
+st.title("🍷 Gestionale Osteria")
+
+tab_listino, tab_fornitori, tab_ricettario = st.tabs(["🛒 Listino Acquisti", "🚚 Fornitori", "📖 Ricettario"])
+
 # --- SCHEDA LISTINO ACQUISTI (LA GRIGLIA PRINCIPALE) ---
 with tab_listino:
     st.subheader("Gestione Magazzino e Prezzi")
@@ -171,3 +215,12 @@ with tab_listino:
             
         except Exception as e:
             st.error(f"Si è verificato un errore durante il salvataggio: {e}")
+
+# --- SCHEDA FORNITORI (Il codice che avevamo scritto nello step precedente) ---
+with tab_fornitori:
+    st.subheader("Gestione Fornitori")
+    # (Inserisci qui il codice della griglia fornitori che abbiamo testato prima)
+
+# --- SCHEDA RICETTARIO ---
+with tab_ricettario:
+    st.subheader("Modulo Ricettario")
