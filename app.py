@@ -58,7 +58,7 @@ if st.session_state.user:
 # --- INTERFACCIA PRINCIPALE ---
 st.title("🍷 Gestionale Osteria")
 
-tab_listino, tab_fornitori, tab_ricettario, tab_impostazioni = st.tabs(["🛒 Listino", "🚚 Fornitori", "📖 Ricettario", "⚙️ Impostazioni", "👥 Staff"])
+tab_listino, tab_fornitori, tab_ricettario, tab_impostazioni, tab_staff = st.tabs(["🛒 Listino", "🚚 Fornitori", "📖 Ricettario", "⚙️ Impostazioni", "👥 Staff"])
 
 # --- SCHEDA LISTINO ACQUISTI (LA GRIGLIA PRINCIPALE) ---
 with tab_listino:
