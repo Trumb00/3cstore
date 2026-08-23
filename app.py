@@ -238,9 +238,72 @@ with tab_listino:
             st.error(f"Si è verificato un errore durante il salvataggio: {e}")
 
 # --- SCHEDA FORNITORI (Il codice che avevamo scritto nello step precedente) ---
+# --- SCHEDA FORNITORI ---
 with tab_fornitori:
-    st.subheader("Gestione Fornitori")
-    # (Inserisci qui il codice della griglia fornitori che abbiamo testato prima)
+    st.subheader("🚚 Gestione Fornitori")
+    st.markdown("Aggiungi o modifica i fornitori. Seleziona e cancella una riga per archiviarla.")
+    
+    # Lettura dati dal database
+    response = supabase.table("fornitori").select("*").order("created_at").execute()
+    
+    if response.data:
+        df_fornitori = pd.DataFrame(response.data)
+        # Filtriamo per mostrare solo i fornitori attivi
+        df_fornitori = df_fornitori[df_fornitori["is_active"] == True].reset_index(drop=True)
+    else:
+        df_fornitori = pd.DataFrame(columns=["id", "nome", "tipo", "is_active", "created_at"])
+    
+    # Creiamo la griglia interattiva
+    edited_fornitori = st.data_editor(
+        df_fornitori,
+        column_config={
+            "id": None, 
+            "created_at": None,
+            "is_active": None, # Nascosto, gestito in automatico
+            "nome": st.column_config.TextColumn("Nome Fornitore", required=True),
+            "tipo": st.column_config.SelectboxColumn("Tipo", options=["Abituale", "Occasionale"], required=True),
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        key="fornitori_editor"
+    )
+    
+    # Logica di salvataggio
+    if st.button("💾 Salva Modifiche Fornitori", type="primary"):
+        changes = st.session_state["fornitori_editor"]
+        
+        try:
+            # 1. Inserimento nuove righe
+            if changes.get("added_rows"):
+                nuovi = []
+                for r in changes["added_rows"]:
+                    nome_forn = str(r.get("nome", "")).strip()
+                    if nome_forn:
+                        nuovi.append({
+                            "nome": nome_forn, 
+                            "tipo": r.get("tipo", "Abituale"), 
+                            "is_active": True
+                        })
+                if nuovi:
+                    supabase.table("fornitori").insert(nuovi).execute()
+            
+            # 2. Modifica righe esistenti
+            if changes.get("edited_rows"):
+                for index, updates in changes["edited_rows"].items():
+                    row_id = df_fornitori.iloc[index]["id"]
+                    supabase.table("fornitori").update(updates).eq("id", row_id).execute()
+            
+            # 3. Eliminazione (Soft Delete)
+            if changes.get("deleted_rows"):
+                for index in changes["deleted_rows"]:
+                    row_id = df_fornitori.iloc[index]["id"]
+                    supabase.table("fornitori").update({"is_active": False}).eq("id", row_id).execute()
+
+            st.success("Fornitori salvati con successo!")
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Errore durante il salvataggio: {e}")
 
 # --- SCHEDA RICETTARIO ---
 # --- SCHEDA RICETTARIO (FOOD COST & SCALABILITÀ) ---
