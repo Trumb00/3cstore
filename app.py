@@ -231,21 +231,35 @@ with tab_impostazioni:
     st.markdown("Imposta i moltiplicatori per convertire liquidi (ml/L) o pezzi (pz) in grammi per il calcolo preciso del food cost.")
     st.info("💡 **Esempi pratici:**\n- L'Olio EVO ha un peso specifico di circa 0.916. Quindi: da `ml` a `g` -> **0.916**\n- Il Latte ha un peso specifico di 1.03. Quindi: da `ml` a `g` -> **1.03**\n- Un Uovo intero pesa circa 50 grammi. Quindi: da `pz` a `g` -> **50.0**")
     
-    # 1. Recupero dati
+    # 1. Recupero dati (Conversioni e Lista Ingredienti)
     res_conv = supabase.table("conversioni_misura").select("*").execute()
+    
+    # NOVITÀ: Peschiamo gli ingredienti generici esistenti (escludiamo i vini per pulizia)
+    res_ing = supabase.table("ingredienti").select("nome_generico").eq("is_wine", False).execute()
+    
+    # Creiamo una lista unica di nomi generici (usiamo un set per eliminare i duplicati)
+    lista_ingredienti_generici = []
+    if res_ing.data:
+        lista_ingredienti_generici = sorted(list(set([ing["nome_generico"] for ing in res_ing.data])))
     
     if res_conv.data:
         df_conv = pd.DataFrame(res_conv.data)
     else:
         df_conv = pd.DataFrame(columns=["id", "ingrediente_generico", "da_um", "a_um", "moltiplicatore"])
         
-    # 2. Griglia interattiva
+    # 2. Griglia interattiva AGGIORNATA
     edited_conv = st.data_editor(
         df_conv,
         column_config={
             "id": None, 
             "created_at": None,
-            "ingrediente_generico": st.column_config.TextColumn("Ingrediente (Generico)", required=True, help="Es: Latte, Olio EVO, Uova"),
+            # NOVITÀ: Ora è una Selectbox popolata con i dati del database
+            "ingrediente_generico": st.column_config.SelectboxColumn(
+                "Ingrediente (Generico)", 
+                options=lista_ingredienti_generici, 
+                required=True, 
+                help="Seleziona l'ingrediente dal magazzino"
+            ),
             "da_um": st.column_config.SelectboxColumn("Da (UM Ricetta)", options=["ml", "L", "pz"], required=True),
             "a_um": st.column_config.TextColumn("A (UM Magazzino)", disabled=True, default="g"),
             "moltiplicatore": st.column_config.NumberColumn("Moltiplicatore", min_value=0.0001, format="%.4f", required=True)
