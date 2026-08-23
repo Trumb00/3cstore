@@ -89,7 +89,7 @@ with tab_listino:
     
     # 2. Recuperiamo il Listino e gli Ingredienti (inclusi gli allergeni)
     query = """
-        id, prezzo_acquisto, peso_unita_acquisto_g, iva, is_scelto, is_active, nome_specifico_prodotto,
+        id, prezzo_acquisto, peso_unita_acquisto_g, iva, is_active, nome_specifico_prodotto,
         ingredienti (id, nome_generico, dettaglio_variante, um_ricetta, categoria, allergeni),
         fornitori (id, nome)
     """
