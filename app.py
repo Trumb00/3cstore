@@ -152,13 +152,14 @@ with tab_listino:
         "listino_id": None, 
         "ingrediente_id": None, 
         "Nome in Ricetta": st.column_config.TextColumn("🔗 Nome in Ricetta", disabled=True), 
-        "UM Ricetta": st.column_config.SelectboxColumn("UM", options=["g", "Kg", "ml", "L", "pz"]),
+        # Rinominate le etichette per chiarezza:
+        "UM Ricetta": st.column_config.SelectboxColumn("UM Acquisto", options=["g", "Kg", "ml", "L", "pz"]),
         "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorie_predefinite, required=True),
         "Fornitore": st.column_config.SelectboxColumn("Fornitore", options=lista_nomi_fornitori),
-        "Peso Acquisto (g/ml)": st.column_config.NumberColumn("Peso (g/ml)", min_value=0),
-        "Prezzo (€)": st.column_config.NumberColumn("Prezzo (€)", format="%.2f"),
+        "Peso Acquisto (g/ml)": st.column_config.NumberColumn("Q.tà Acquisto", min_value=0),
+        "Prezzo (€)": st.column_config.NumberColumn("Prezzo Netto (€)", format="%.2f"),
         "IVA (%)": st.column_config.NumberColumn("IVA (%)", min_value=0, max_value=100, format="%d"),
-        "Prezzo + IVA (€)": st.column_config.NumberColumn("Prezzo + IVA (€)", format="%.2f", disabled=True),
+        "Prezzo + IVA (€)": st.column_config.NumberColumn("Prezzo Ivato (€)", format="%.2f", disabled=True),
         "Attivo": st.column_config.CheckboxColumn("Attivo"),
     }
     # Aggiungiamo automaticamente le 14 checkbox degli allergeni alla fine
@@ -330,9 +331,9 @@ with tab_fornitori:
 # --- SCHEDA RICETTARIO ---
 # --- SCHEDA RICETTARIO (FOOD COST & SCALABILITÀ) ---
 with tab_ricettario:
-    st.subheader("📖 Ricettario e Food Cost")
+    st.subheader("📖 Ricettario e Food Cost (In Grammi)")
     
-    # 1. CARICAMENTO DATI
+    # 1. CARICAMENTO DATI BASE
     ricette_res = supabase.table("ricette").select("*").eq("is_active", True).order("nome_ricetta").execute()
     lista_ricette = {r["nome_ricetta"]: r["id"] for r in ricette_res.data} if ricette_res.data else {}
     
@@ -341,33 +342,48 @@ with tab_ricettario:
     nomi_ing_completi = [f"{i['nome_generico']} {i['dettaglio_variante']}".strip() for i in ing_res.data] if ing_res.data else []
     nome_to_id_ing = {f"{i['nome_generico']} {i['dettaglio_variante']}".strip(): i["id"] for i in ing_res.data} if ing_res.data else {}
     
-    # Lista di tutti i fornitori per la tendina
     res_forn = supabase.table("fornitori").select("id, nome").eq("is_active", True).execute()
     fornitori_dict = {f["nome"]: f["id"] for f in res_forn.data} if res_forn.data else {}
-    lista_nomi_fornitori = [None] + list(fornitori_dict.keys()) # None permette di lasciare vuoto per auto-selezionare il più economico
+    lista_nomi_fornitori = [None] + list(fornitori_dict.keys())
     id_to_nome_fornitore = {f["id"]: f["nome"] for f in res_forn.data} if res_forn.data else {}
     
-    # Recuperiamo TUTTO il listino (ignoriamo is_scelto, calcoliamo il prezzo al grammo per tutti)
+    # Dizionario Conversioni (da Impostazioni)
+    conv_res = supabase.table("conversioni_misura").select("*").execute()
+    conv_dict = {(c["ingrediente_generico"], c["da_um"]): c["moltiplicatore"] for c in conv_res.data} if conv_res.data else {}
+
+    # 2. IL MOTORE DI CALCOLO: TRASFORMIAMO TUTTO IL MAGAZZINO IN GRAMMI
     listino_res = supabase.table("listino_acquisti").select("ingrediente_id, fornitore_id, prezzo_acquisto, peso_unita_acquisto_g").eq("is_active", True).execute()
     
-    # Strutturiamo i prezzi: prezzi_per_ingrediente[id_ingrediente] = [{"fornitore_id": x, "costo_g": y}, ...]
     prezzi_per_ingrediente = {}
     if listino_res.data:
         for p in listino_res.data:
             i_id = p["ingrediente_id"]
             f_id = p["fornitore_id"]
-            peso = float(p["peso_unita_acquisto_g"])
-            prezzo = float(p["prezzo_acquisto"])
-            if peso > 0:
-                costo_g = prezzo / peso
-                if i_id not in prezzi_per_ingrediente:
-                    prezzi_per_ingrediente[i_id] = []
-                prezzi_per_ingrediente[i_id].append({"fornitore_id": f_id, "costo_g": costo_g})
+            qta_acquisto = float(p["peso_unita_acquisto_g"])
+            prezzo_netto = float(p["prezzo_acquisto"])
+            
+            if qta_acquisto > 0:
+                # Recuperiamo l'Unità di Misura di Acquisto dal DB
+                ing_info = ing_dict.get(i_id, {})
+                um_acquisto = ing_info.get("um_ricetta", "g") 
+                nome_generico = ing_info.get("nome_generico", "")
                 
-    conv_res = supabase.table("conversioni_misura").select("*").execute()
-    conv_dict = {(c["ingrediente_generico"], c["da_um"]): c["moltiplicatore"] for c in conv_res.data} if conv_res.data else {}
+                # Applichiamo le formule per trovare i grammi totali acquistati
+                peso_totale_in_grammi = qta_acquisto
+                if um_acquisto == "Kg":
+                    peso_totale_in_grammi = qta_acquisto * 1000
+                elif um_acquisto in ["ml", "L", "pz"]:
+                    moltiplicatore = float(conv_dict.get((nome_generico, um_acquisto), 1.0))
+                    peso_totale_in_grammi = qta_acquisto * moltiplicatore
+                
+                # Calcoliamo matematicamente il costo netto di 1 singolo grammo
+                if peso_totale_in_grammi > 0:
+                    costo_al_grammo = prezzo_netto / peso_totale_in_grammi
+                    if i_id not in prezzi_per_ingrediente:
+                        prezzi_per_ingrediente[i_id] = []
+                    prezzi_per_ingrediente[i_id].append({"fornitore_id": f_id, "costo_g": costo_al_grammo})
 
-    # 2. MENU DI NAVIGAZIONE
+    # 3. MENU DI NAVIGAZIONE
     opzioni_ricetta = ["-- ✨ Crea Nuova Ricetta --"] + list(lista_ricette.keys())
     ricetta_selezionata = st.selectbox("Seleziona un piatto o creane uno nuovo:", options=opzioni_ricetta)
     st.divider()
@@ -385,14 +401,13 @@ with tab_ricettario:
                     st.success("Ricetta creata! Selezionala dal menu in alto.")
                     st.rerun()
     else:
-        # 3. VISUALIZZAZIONE RICETTA
+        # 4. VISUALIZZAZIONE RICETTA (TUTTA IN GRAMMI)
         ric_id = lista_ricette[ricetta_selezionata]
         dettagli_ricetta = next(r for r in ricette_res.data if r["id"] == ric_id)
         
         st.markdown(f"## 🍽️ {dettagli_ricetta['nome_ricetta']}")
         porzioni = st.number_input("🔢 Inserisci il numero di porzioni (o moltiplicatore):", min_value=0.1, value=1.0, step=1.0)
         
-        # Recuperiamo gli ingredienti della ricetta includendo il fornitore scelto
         ing_ric_res = supabase.table("ingredienti_ricetta").select("*, fornitori(nome)").eq("ricetta_id", ric_id).execute()
         
         dati_tabella = []
@@ -402,34 +417,25 @@ with tab_ricettario:
         if ing_ric_res.data:
             for riga in ing_ric_res.data:
                 i_id = riga["ingrediente_id"]
-                qta_base = float(riga["quantita"])
+                # Nel DB la quantità inserita è ORA SEMPRE E SOLO GRAMMI
+                qta_in_grammi = float(riga["quantita"]) 
                 fornitore_salvato_id = riga.get("fornitore_scelto_id")
                 
                 ing_info = ing_dict.get(i_id, {})
-                nome_generico = ing_info.get('nome_generico', '')
-                nome_completo = f"{nome_generico} {ing_info.get('dettaglio_variante', '')}".strip()
-                um_ufficiale = ing_info.get("um_ricetta", "g")
+                nome_completo = f"{ing_info.get('nome_generico', '')} {ing_info.get('dettaglio_variante', '')}".strip()
                 
                 for al in ing_info.get("allergeni", []):
                     allergeni_totali.add(al)
                     
-                qta_scalata = qta_base * porzioni
+                qta_scalata_in_grammi = qta_in_grammi * porzioni
                 
-                # Conversione in grammi
-                qta_in_grammi = qta_scalata
-                if um_ufficiale == "Kg": qta_in_grammi = qta_scalata * 1000
-                elif um_ufficiale in ["ml", "L", "pz"]:
-                    molt = float(conv_dict.get((nome_generico, um_ufficiale), 1.0))
-                    qta_in_grammi = (qta_scalata * 1000 * molt) if um_ufficiale == "L" else (qta_scalata * molt)
-                    
-                # LOGICA DEL PREZZO: Più economico vs Scelto manualmente
+                # Assegnazione Fornitore e Costo
                 opzioni_prezzo = prezzi_per_ingrediente.get(i_id, [])
                 costo_al_grammo = 0.0
                 nome_fornitore_display = None
                 
                 if opzioni_prezzo:
                     if fornitore_salvato_id:
-                        # Ha scelto un fornitore specifico: cerchiamo il suo prezzo
                         specifico = next((p for p in opzioni_prezzo if p["fornitore_id"] == fornitore_salvato_id), None)
                         if specifico:
                             costo_al_grammo = specifico["costo_g"]
@@ -437,27 +443,27 @@ with tab_ricettario:
                         else:
                             nome_fornitore_display = "⚠️ Fornitore senza prezzo"
                     else:
-                        # Nessun fornitore scelto: AUTO-CERCA IL PIÙ ECONOMICO
                         cheapest = min(opzioni_prezzo, key=lambda x: x["costo_g"])
                         costo_al_grammo = cheapest["costo_g"]
                         nome_f = id_to_nome_fornitore.get(cheapest["fornitore_id"], "")
                         nome_fornitore_display = f"⭐ {nome_f} (Miglior Prezzo)"
                 
-                costo_ing = costo_al_grammo * qta_in_grammi
+                # Moltiplichiamo Euro al Grammo X Grammi da preparare
+                costo_ing = costo_al_grammo * qta_scalata_in_grammi
                 costo_totale_ricetta += costo_ing
                 
                 dati_tabella.append({
                     "id_riga": riga["id"],
                     "Ingrediente": nome_completo,
-                    "Q.tà (Base 1 porz.)": qta_base,
-                    "UM": um_ufficiale,
+                    "Q.tà (Base 1 porz.)": qta_in_grammi,
+                    "UM": "g", # UI FISSA SUI GRAMMI
                     "Fornitore": id_to_nome_fornitore.get(fornitore_salvato_id) if fornitore_salvato_id else None,
                     "Fornitore Applicato": nome_fornitore_display,
-                    "Q.tà da Preparare": qta_scalata,
+                    "Q.tà da Preparare": qta_scalata_in_grammi,
                     "Costo (€)": costo_ing
                 })
                 
-        # 4. METRICHE
+        # METRICHE
         col_m1, col_m2 = st.columns(2)
         col_m1.metric("Food Cost Totale (per queste porzioni)", f"€ {costo_totale_ricetta:.2f}")
         col_m2.metric("Food Cost per Singola Porzione", f"€ {(costo_totale_ricetta/porzioni if porzioni>0 else 0):.2f}")
@@ -467,24 +473,23 @@ with tab_ricettario:
         else:
             st.success("✅ Nessun allergene rilevato.")
             
-        st.markdown("#### Composizione Ingredienti")
-        st.caption("💡 Se lasci la colonna 'Fornitore' vuota, il sistema calcolerà automaticamente il food cost basandosi sul prezzo più basso in magazzino.")
+        st.markdown("#### Composizione Ingredienti (Esclusivamente in Grammi)")
         
         df_ing_ric = pd.DataFrame(dati_tabella) if dati_tabella else pd.DataFrame(columns=[
             "id_riga", "Ingrediente", "Q.tà (Base 1 porz.)", "UM", "Fornitore", "Fornitore Applicato", "Q.tà da Preparare", "Costo (€)"
         ])
         
-        # 5. EDITOR
+        # 5. EDITOR RICETTA
         edited_ricetta = st.data_editor(
             df_ing_ric,
             column_config={
                 "id_riga": None,
                 "Ingrediente": st.column_config.SelectboxColumn("Ingrediente", options=nomi_ing_completi, required=True),
-                "Q.tà (Base 1 porz.)": st.column_config.NumberColumn("Quantità a crudo", min_value=0.01, format="%.2f", required=True),
+                "Q.tà (Base 1 porz.)": st.column_config.NumberColumn("Grammi a crudo", min_value=0.01, format="%.2f", required=True),
                 "UM": st.column_config.TextColumn("UM", disabled=True),
                 "Fornitore": st.column_config.SelectboxColumn("Fornitore (Opzionale)", options=lista_nomi_fornitori),
                 "Fornitore Applicato": st.column_config.TextColumn("Prezzo Usato Da:", disabled=True),
-                "Q.tà da Preparare": st.column_config.NumberColumn("Totale Scalato", disabled=True, format="%.2f"),
+                "Q.tà da Preparare": st.column_config.NumberColumn("Grammi Scalati", disabled=True, format="%.2f"),
                 "Costo (€)": st.column_config.NumberColumn("Costo Calcolato", disabled=True, format="%.3f"),
             },
             num_rows="dynamic",
@@ -531,40 +536,35 @@ with tab_ricettario:
                 st.rerun()
             except Exception as e:
                 st.error(f"Errore di salvataggio: {e}")
-                # Mostriamo le istruzioni testuali alla fine
+
+        # --- SEZIONE PDF E ARCHIVIAZIONE ---
         if dettagli_ricetta.get("istruzioni"):
             st.divider()
             st.markdown("#### 👨‍🍳 Procedimento")
             st.write(dettagli_ricetta["istruzioni"])
             
         st.divider()
-        
-        # --- GENERAZIONE E DOWNLOAD PDF ---
         st.markdown("#### 🖨️ Stampa Ricetta")
         
-        # Creiamo una funzione per generare il PDF
         def genera_pdf():
             pdf = FPDF()
             pdf.add_page()
             
-            # Titolo
             pdf.set_font("helvetica", "B", 18)
             pdf.cell(0, 10, f"Ricetta: {dettagli_ricetta['nome_ricetta']}", ln=True, align="C")
             
-            # Info Base
             pdf.set_font("helvetica", "", 12)
             pdf.cell(0, 8, f"Categoria: {dettagli_ricetta['tipo_piatto']}", ln=True)
             pdf.cell(0, 8, f"Porzioni da preparare: {porzioni}", ln=True)
             
             if allergeni_totali:
                 pdf.set_font("helvetica", "B", 10)
-                pdf.set_text_color(220, 53, 69) # Rosso
+                pdf.set_text_color(220, 53, 69)
                 pdf.cell(0, 8, f"ALLERGENI: {', '.join(sorted(list(allergeni_totali)))}", ln=True)
-                pdf.set_text_color(0, 0, 0) # Ritorna nero
+                pdf.set_text_color(0, 0, 0)
             
             pdf.ln(5)
             
-            # Tabella Ingredienti
             pdf.set_font("helvetica", "B", 12)
             pdf.cell(80, 10, "Ingrediente", border=1)
             pdf.cell(40, 10, "Quantità", border=1)
@@ -574,7 +574,6 @@ with tab_ricettario:
             pdf.set_font("helvetica", "", 11)
             if dati_tabella:
                 for riga in dati_tabella:
-                    # Tronchiamo il nome se è troppo lungo per la cella
                     nome_ing = str(riga['Ingrediente'])[:35]
                     qta = f"{riga['Q.tà da Preparare']:.2f}"
                     um = str(riga['UM'])
@@ -584,7 +583,6 @@ with tab_ricettario:
                     pdf.cell(30, 10, um, border=1)
                     pdf.ln()
             
-            # Procedimento
             if dettagli_ricetta.get("istruzioni"):
                 pdf.ln(10)
                 pdf.set_font("helvetica", "B", 14)
@@ -592,10 +590,8 @@ with tab_ricettario:
                 pdf.set_font("helvetica", "", 11)
                 pdf.multi_cell(0, 6, dettagli_ricetta["istruzioni"])
             
-            # Ritorna il PDF come byte
             return bytes(pdf.output())
 
-        # Bottone di Download di Streamlit
         pdf_bytes = genera_pdf()
         nome_file = f"Ricetta_{dettagli_ricetta['nome_ricetta'].replace(' ', '_')}.pdf"
         
@@ -606,13 +602,12 @@ with tab_ricettario:
             mime="application/pdf",
             type="primary"
         )
-        # ----------------------------------
 
         st.divider()
         if st.button("🗑️ Archivia Ricetta (Soft Delete)", type="secondary"):
             supabase.table("ricette").update({"is_active": False}).eq("id", ric_id).execute()
             st.rerun()
-
+            
 # --- SCHEDA IMPOSTAZIONI (CONVERSIONI) ---
 with tab_impostazioni:
     st.subheader("Conversione Unità di Misura")
