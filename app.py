@@ -510,6 +510,87 @@ with tab_ricettario:
                 st.rerun()
             except Exception as e:
                 st.error(f"Errore di salvataggio: {e}")
+                # Mostriamo le istruzioni testuali alla fine
+        if dettagli_ricetta.get("istruzioni"):
+            st.divider()
+            st.markdown("#### 👨‍🍳 Procedimento")
+            st.write(dettagli_ricetta["istruzioni"])
+            
+        st.divider()
+        
+        # --- GENERAZIONE E DOWNLOAD PDF ---
+        st.markdown("#### 🖨️ Stampa Ricetta")
+        
+        # Creiamo una funzione per generare il PDF
+        def genera_pdf():
+            pdf = FPDF()
+            pdf.add_page()
+            
+            # Titolo
+            pdf.set_font("helvetica", "B", 18)
+            pdf.cell(0, 10, f"Ricetta: {dettagli_ricetta['nome_ricetta']}", ln=True, align="C")
+            
+            # Info Base
+            pdf.set_font("helvetica", "", 12)
+            pdf.cell(0, 8, f"Categoria: {dettagli_ricetta['tipo_piatto']}", ln=True)
+            pdf.cell(0, 8, f"Porzioni da preparare: {porzioni}", ln=True)
+            
+            if allergeni_totali:
+                pdf.set_font("helvetica", "B", 10)
+                pdf.set_text_color(220, 53, 69) # Rosso
+                pdf.cell(0, 8, f"ALLERGENI: {', '.join(sorted(list(allergeni_totali)))}", ln=True)
+                pdf.set_text_color(0, 0, 0) # Ritorna nero
+            
+            pdf.ln(5)
+            
+            # Tabella Ingredienti
+            pdf.set_font("helvetica", "B", 12)
+            pdf.cell(80, 10, "Ingrediente", border=1)
+            pdf.cell(40, 10, "Quantità", border=1)
+            pdf.cell(30, 10, "UM", border=1)
+            pdf.ln()
+            
+            pdf.set_font("helvetica", "", 11)
+            if dati_tabella:
+                for riga in dati_tabella:
+                    # Tronchiamo il nome se è troppo lungo per la cella
+                    nome_ing = str(riga['Ingrediente'])[:35]
+                    qta = f"{riga['Q.tà da Preparare']:.2f}"
+                    um = str(riga['UM'])
+                    
+                    pdf.cell(80, 10, nome_ing, border=1)
+                    pdf.cell(40, 10, qta, border=1)
+                    pdf.cell(30, 10, um, border=1)
+                    pdf.ln()
+            
+            # Procedimento
+            if dettagli_ricetta.get("istruzioni"):
+                pdf.ln(10)
+                pdf.set_font("helvetica", "B", 14)
+                pdf.cell(0, 10, "Procedimento:", ln=True)
+                pdf.set_font("helvetica", "", 11)
+                pdf.multi_cell(0, 6, dettagli_ricetta["istruzioni"])
+            
+            # Ritorna il PDF come byte
+            return bytes(pdf.output())
+
+        # Bottone di Download di Streamlit
+        pdf_bytes = genera_pdf()
+        nome_file = f"Ricetta_{dettagli_ricetta['nome_ricetta'].replace(' ', '_')}.pdf"
+        
+        st.download_button(
+            label="📄 Scarica Ricetta in PDF",
+            data=pdf_bytes,
+            file_name=nome_file,
+            mime="application/pdf",
+            type="primary"
+        )
+        # ----------------------------------
+
+        st.divider()
+        if st.button("🗑️ Archivia Ricetta (Soft Delete)", type="secondary"):
+            supabase.table("ricette").update({"is_active": False}).eq("id", ric_id).execute()
+            st.rerun()
 
 # --- SCHEDA IMPOSTAZIONI (CONVERSIONI) ---
 with tab_impostazioni:
