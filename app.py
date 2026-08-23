@@ -703,3 +703,39 @@ with tab_impostazioni:
             
         except Exception as e:
             st.error(f"Errore durante il salvataggio delle conversioni: {e}")
+
+# --- SCHEDA GESTIONE STAFF ---
+with tab_staff:
+    st.subheader("👥 Gestione Staff e Inviti")
+    
+    if ruolo_utente in ["admin", "responsabile"]:
+        st.markdown("Invita nuovi collaboratori e assegna loro un ruolo.")
+        
+        with st.form("form_invito"):
+            nuova_email = st.text_input("Email del collaboratore")
+            nuovo_ruolo = st.selectbox("Ruolo da assegnare", ["visitatore", "responsabile", "admin"])
+            
+            if st.form_submit_button("Invia Invito", type="primary"):
+                if nuova_email:
+                    try:
+                        # 1. Inviamo l'email di invito ufficiale tramite Supabase Auth
+                        res_invite = supabase_admin.auth.admin.invite_user_by_email(nuova_email)
+                        nuovo_user_id = res_invite.user.id
+                        
+                        # 2. Registriamo il suo ruolo nella nostra tabella
+                        supabase_admin.table("ruoli_utenti").insert({
+                            "user_id": nuovo_user_id,
+                            "ruolo": nuovo_ruolo
+                        }).execute()
+                        
+                        st.success(f"Invito inviato con successo a {nuova_email} come {nuovo_ruolo}!")
+                    except Exception as e:
+                        st.error(f"Errore durante l'invio: assicurati che l'utente non esista già. ({e})")
+                else:
+                    st.warning("Inserisci un'email valida.")
+                    
+        # Qui potresti anche aggiungere una tabella per vedere gli utenti attuali
+        st.divider()
+        st.info("💡 I collaboratori riceveranno un'email con un link magico per impostare la password ed entrare.")
+    else:
+        st.error("🚫 Accesso Negato. Solo gli Admin e i Responsabili possono invitare nuovi utenti.")
