@@ -1,6 +1,7 @@
 import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
+from fpdf import FPDF  # AGGIUNGI QUESTA RIGA
 
 st.set_page_config(page_title="Gestionale Osteria", page_icon="🍷", layout="wide")
 
