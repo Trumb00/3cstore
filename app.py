@@ -243,8 +243,195 @@ with tab_fornitori:
     # (Inserisci qui il codice della griglia fornitori che abbiamo testato prima)
 
 # --- SCHEDA RICETTARIO ---
+# --- SCHEDA RICETTARIO (FOOD COST & SCALABILITÀ) ---
 with tab_ricettario:
-    st.subheader("Modulo Ricettario")
+    st.subheader("📖 Ricettario e Food Cost")
+    
+    # 1. CARICAMENTO DI TUTTI I DATI NECESSARI
+    # Ricette
+    ricette_res = supabase.table("ricette").select("*").eq("is_active", True).order("nome_ricetta").execute()
+    lista_ricette = {r["nome_ricetta"]: r["id"] for r in ricette_res.data} if ricette_res.data else {}
+    
+    # Ingredienti (con i loro allergeni e UM)
+    ing_res = supabase.table("ingredienti").select("id, nome_generico, dettaglio_variante, um_ricetta, allergeni").eq("is_wine", False).execute()
+    ing_dict = {i["id"]: i for i in ing_res.data} if ing_res.data else {}
+    
+    # Dizionari per l'editor
+    nomi_ing_completi = [f"{i['nome_generico']} {i['dettaglio_variante']}".strip() for i in ing_res.data] if ing_res.data else []
+    nome_to_id_ing = {f"{i['nome_generico']} {i['dettaglio_variante']}".strip(): i["id"] for i in ing_res.data} if ing_res.data else {}
+    
+    # Prezzi 'Scelti' (Solo i fornitori attivati per il calcolo costi)
+    prezzi_res = supabase.table("listino_acquisti").select("ingrediente_id, prezzo_acquisto, peso_unita_acquisto_g").eq("is_scelto", True).execute()
+    prezzi_dict = {p["ingrediente_id"]: p for p in prezzi_res.data} if prezzi_res.data else {}
+    
+    # Moltiplicatori di conversione (es. da ml a g)
+    conv_res = supabase.table("conversioni_misura").select("*").execute()
+    conv_dict = {(c["ingrediente_generico"], c["da_um"]): c["moltiplicatore"] for c in conv_res.data} if conv_res.data else {}
+
+    # 2. MENU DI NAVIGAZIONE RICETTE
+    opzioni_ricetta = ["-- ✨ Crea Nuova Ricetta --"] + list(lista_ricette.keys())
+    ricetta_selezionata = st.selectbox("Seleziona un piatto o creane uno nuovo:", options=opzioni_ricetta)
+    st.divider()
+        
+    if ricetta_selezionata == "-- ✨ Crea Nuova Ricetta --":
+        st.markdown("### Nuova Ricetta")
+        with st.form("form_nuova_ricetta"):
+            # Piccola personalizzazione per rendere l'inserimento più familiare
+            nome_r = st.text_input("Nome del Piatto (es. Frico croccante, Cjarsons della Carnia)")
+            tipo_r = st.selectbox("Portata", ["Antipasto", "Primo", "Secondo", "Contorno", "Dessert", "Base (es. Impasto)"])
+            istruzioni = st.text_area("Procedimento in cucina (opzionale)")
+            
+            if st.form_submit_button("Salva Intestazione", type="primary"):
+                if nome_r:
+                    supabase.table("ricette").insert({"nome_ricetta": nome_r, "tipo_piatto": tipo_r, "istruzioni": istruzioni}).execute()
+                    st.success("Ricetta creata! Ora puoi selezionarla dal menu in alto per aggiungere gli ingredienti.")
+                    st.rerun()
+                else:
+                    st.error("Inserisci un nome per la ricetta.")
+    else:
+        # 3. VISUALIZZAZIONE E CALCOLO DELLA RICETTA SELEZIONATA
+        ric_id = lista_ricette[ricetta_selezionata]
+        dettagli_ricetta = next(r for r in ricette_res.data if r["id"] == ric_id)
+        
+        st.markdown(f"## 🍽️ {dettagli_ricetta['nome_ricetta']}")
+        st.caption(f"Categoria: {dettagli_ricetta['tipo_piatto']}")
+        
+        # IL MOTORE DI SCALABILITÀ
+        porzioni = st.number_input("🔢 Inserisci il numero di porzioni (o moltiplicatore) da preparare:", min_value=0.1, value=1.0, step=1.0)
+        
+        # Carichiamo gli ingredienti associati a questa specifica ricetta
+        ing_ric_res = supabase.table("ingredienti_ricetta").select("*").eq("ricetta_id", ric_id).execute()
+        
+        dati_tabella = []
+        costo_totale_ricetta = 0.0
+        allergeni_totali = set()
+        
+        if ing_ric_res.data:
+            for riga in ing_ric_res.data:
+                i_id = riga["ingrediente_id"]
+                qta_base = float(riga["quantita"]) # La quantità per 1 singola porzione inserita a sistema
+                
+                ing_info = ing_dict.get(i_id, {})
+                nome_generico = ing_info.get('nome_generico', '')
+                nome_completo = f"{nome_generico} {ing_info.get('dettaglio_variante', '')}".strip()
+                um_ufficiale = ing_info.get("um_ricetta", "g")
+                
+                # Unione automatica degli allergeni
+                for al in ing_info.get("allergeni", []):
+                    allergeni_totali.add(al)
+                    
+                # 1. Moltiplichiamo per le porzioni desiderate
+                qta_scalata = qta_base * porzioni
+                
+                # 2. Convertiamo in Grammi per il listino prezzi
+                qta_in_grammi = qta_scalata
+                if um_ufficiale == "Kg":
+                    qta_in_grammi = qta_scalata * 1000
+                elif um_ufficiale in ["ml", "L", "pz"]:
+                    moltiplicatore = float(conv_dict.get((nome_generico, um_ufficiale), 1.0))
+                    # Se l'UM in magazzino è Litri, forziamo prima il passaggio in ml
+                    if um_ufficiale == "L":
+                         qta_in_grammi = (qta_scalata * 1000) * moltiplicatore
+                    else:
+                         qta_in_grammi = qta_scalata * moltiplicatore
+                    
+                # 3. Calcoliamo il Food Cost (leggendo il prezzo "Scelto")
+                prezzo_info = prezzi_dict.get(i_id)
+                costo_ing = 0.0
+                if prezzo_info and prezzo_info["peso_unita_acquisto_g"] > 0:
+                    costo_al_grammo = float(prezzo_info["prezzo_acquisto"]) / float(prezzo_info["peso_unita_acquisto_g"])
+                    costo_ing = costo_al_grammo * qta_in_grammi
+                    
+                costo_totale_ricetta += costo_ing
+                
+                dati_tabella.append({
+                    "id_riga": riga["id"],
+                    "Ingrediente": nome_completo,
+                    "Q.tà (Base 1 porz.)": qta_base,
+                    "UM": um_ufficiale,
+                    "Q.tà da Preparare": qta_scalata,
+                    "Costo (€)": costo_ing
+                })
+                
+        # 4. METRICHE FINANZIARIE IN EVIDENZA
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("Food Cost Totale (per queste porzioni)", f"€ {costo_totale_ricetta:.2f}")
+        col_m2.metric("Food Cost per Singola Porzione", f"€ {(costo_totale_ricetta/porzioni if porzioni>0 else 0):.2f}")
+        
+        # ALLERGENI IN EVIDENZA
+        if allergeni_totali:
+            st.error(f"⚠️ **Allergeni generati automaticamente:** {', '.join(sorted(list(allergeni_totali)))}")
+        else:
+            st.success("✅ Nessun allergene rilevato (in base alle spunte in magazzino).")
+            
+        st.markdown("#### Composizione Ingredienti")
+        df_ing_ric = pd.DataFrame(dati_tabella) if dati_tabella else pd.DataFrame(columns=["id_riga", "Ingrediente", "Q.tà (Base 1 porz.)", "UM", "Q.tà da Preparare", "Costo (€)"])
+        
+        # 5. EDITOR INGREDIENTI
+        edited_ricetta = st.data_editor(
+            df_ing_ric,
+            column_config={
+                "id_riga": None,
+                "Ingrediente": st.column_config.SelectboxColumn("Ingrediente", options=nomi_ing_completi, required=True),
+                "Q.tà (Base 1 porz.)": st.column_config.NumberColumn("Quantità a crudo", min_value=0.01, format="%.2f", required=True),
+                "UM": st.column_config.TextColumn("UM", disabled=True),
+                "Q.tà da Preparare": st.column_config.NumberColumn("Totale Scalato", disabled=True, format="%.2f"),
+                "Costo (€)": st.column_config.NumberColumn("Costo Calcolato", disabled=True, format="%.3f"),
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"editor_ric_{ric_id}"
+        )
+        
+        if st.button("💾 Salva Ingredienti", type="primary"):
+            changes = st.session_state[f"editor_ric_{ric_id}"]
+            try:
+                # Nuovi inserimenti
+                if changes.get("added_rows"):
+                    nuove_righe = []
+                    for riga in changes["added_rows"]:
+                        if riga.get("Ingrediente") and riga.get("Q.tà (Base 1 porz.)"):
+                            nuove_righe.append({
+                                "ricetta_id": ric_id,
+                                "ingrediente_id": nome_to_id_ing.get(riga["Ingrediente"]),
+                                "quantita": riga["Q.tà (Base 1 porz.)"]
+                            })
+                    if nuove_righe:
+                        supabase.table("ingredienti_ricetta").insert(nuove_righe).execute()
+                        
+                # Modifiche
+                if changes.get("edited_rows"):
+                    for index, updates in changes["edited_rows"].items():
+                        row_id = df_ing_ric.iloc[index]["id_riga"]
+                        upd = {}
+                        if "Ingrediente" in updates:
+                            upd["ingrediente_id"] = nome_to_id_ing.get(updates["Ingrediente"])
+                        if "Q.tà (Base 1 porz.)" in updates:
+                            upd["quantita"] = updates["Q.tà (Base 1 porz.)"]
+                        if upd:
+                            supabase.table("ingredienti_ricetta").update(upd).eq("id", row_id).execute()
+                            
+                # Eliminazioni
+                if changes.get("deleted_rows"):
+                    for index in changes["deleted_rows"]:
+                        row_id = df_ing_ric.iloc[index]["id_riga"]
+                        supabase.table("ingredienti_ricetta").delete().eq("id", row_id).execute()
+                        
+                st.success("Ingredienti aggiornati con successo!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Errore di salvataggio: {e}")
+                
+        # Mostriamo le istruzioni testuali alla fine
+        if dettagli_ricetta.get("istruzioni"):
+            st.divider()
+            st.markdown("#### 👨‍🍳 Procedimento")
+            st.write(dettagli_ricetta["istruzioni"])
+            
+        st.divider()
+        if st.button("🗑️ Archivia Ricetta (Soft Delete)", type="secondary"):
+            supabase.table("ricette").update({"is_active": False}).eq("id", ric_id).execute()
+            st.rerun()
 
 # --- SCHEDA IMPOSTAZIONI (CONVERSIONI) ---
 with tab_impostazioni:
