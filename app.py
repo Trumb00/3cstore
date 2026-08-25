@@ -41,11 +41,28 @@ if not st.session_state.user:
     st.stop()
 
 with st.sidebar:
-    st.write(f"Utente: {st.session_state.user.email}")
-    if st.button("Log Out"):
+    st.write("Utente loggato:")
+    st.markdown(f"**{st.session_state.user.email}**")
+    
+    if st.button("🚪 Log Out", use_container_width=True):
         supabase.auth.sign_out()
         st.session_state.user = None
         st.rerun()
+
+    st.divider()
+    
+    st.markdown("🔐 **Aggiorna Password**")
+    nuova_pw = st.text_input("Nuova Password", type="password", key="new_pw_input")
+    if st.button("Salva Nuova Password"):
+        if len(nuova_pw) >= 6:
+            try:
+                # Supabase permette all'utente loggato di aggiornare la propria password
+                supabase.auth.update_user({"password": nuova_pw})
+                st.success("✅ Password aggiornata con successo!")
+            except Exception as e:
+                st.error(f"Errore: {e}")
+        else:
+            st.warning("La password deve avere almeno 6 caratteri.")
 
 # --- VERIFICA RUOLO UTENTE LOGGATO ---
 # Da inserire SUBITO DOPO il blocco del Login e prima di st.title
@@ -862,21 +879,26 @@ with tab_impostazioni:
 
 # --- SCHEDA GESTIONE STAFF ---
 with tab_staff:
-    st.subheader("👥 Gestione Staff e Inviti")
+    st.subheader("👥 Gestione Staff e Accessi")
     
     if ruolo_utente in ["admin", "responsabile"]:
-        st.markdown("Invita nuovi collaboratori e assegna loro un ruolo.")
+        st.markdown("Crea un account per i nuovi collaboratori e assegna loro una password temporanea.")
         
-        with st.form("form_invito"):
+        with st.form("form_creazione_utente"):
             nuova_email = st.text_input("Email del collaboratore")
+            nuova_password = st.text_input("Password Temporanea (min. 6 caratteri)", type="password")
             nuovo_ruolo = st.selectbox("Ruolo da assegnare", ["visitatore", "responsabile", "admin"])
             
-            if st.form_submit_button("Invia Invito", type="primary"):
-                if nuova_email:
+            if st.form_submit_button("Crea Utente e Autorizza Accesso", type="primary"):
+                if nuova_email and len(nuova_password) >= 6:
                     try:
-                        # 1. Inviamo l'email di invito ufficiale tramite Supabase Auth
-                        res_invite = supabase_admin.auth.admin.invite_user_by_email(nuova_email)
-                        nuovo_user_id = res_invite.user.id
+                        # 1. Creiamo l'utente direttamente con la password attivata
+                        res_user = supabase_admin.auth.admin.create_user({
+                            "email": nuova_email,
+                            "password": nuova_password,
+                            "email_confirm": True # Lo segna come già confermato
+                        })
+                        nuovo_user_id = res_user.user.id
                         
                         # 2. Registriamo il suo ruolo nella nostra tabella
                         supabase_admin.table("ruoli_utenti").insert({
@@ -884,14 +906,10 @@ with tab_staff:
                             "ruolo": nuovo_ruolo
                         }).execute()
                         
-                        st.success(f"Invito inviato con successo a {nuova_email} come {nuovo_ruolo}!")
+                        st.success(f"✅ Utente creato con successo! Ora comunica a {nuova_email} la sua password temporanea.")
                     except Exception as e:
-                        st.error(f"Errore durante l'invio: assicurati che l'utente non esista già. ({e})")
+                        st.error(f"Errore durante la creazione: {e}")
                 else:
-                    st.warning("Inserisci un'email valida.")
-                    
-        # Qui potresti anche aggiungere una tabella per vedere gli utenti attuali
-        st.divider()
-        st.info("💡 I collaboratori riceveranno un'email con un link magico per impostare la password ed entrare.")
+                    st.warning("Inserisci un'email valida e una password di almeno 6 caratteri.")
     else:
-        st.error("🚫 Accesso Negato. Solo gli Admin e i Responsabili possono invitare nuovi utenti.")
+        st.error("🚫 Accesso Negato. Solo gli Admin e i Responsabili possono creare nuovi utenti.")
