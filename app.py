@@ -138,7 +138,7 @@ with tab_listino:
                     dett = str(riga.get("Dettaglio", "")).strip().lower()
                     nome_forn = riga.get("Fornitore")
                     
-                    if not gen or non nome_forn: continue
+                    if not gen or not nome_forn: continue
                     forn_id = fornitori_dict.get(nome_forn)
                     
                     # Controllo esistenza e creazione in Supabase (MANTIENI LA TUA LOGICA QUI)
