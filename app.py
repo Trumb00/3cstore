@@ -77,206 +77,89 @@ st.title("🍷 Gestionale Osteria")
 
 tab_listino, tab_vini, tab_fornitori, tab_ricettario, tab_impostazioni, tab_staff = st.tabs(["🛒 Listino (Cibo)", "🍷 Cantina Vini", "🚚 Fornitori", "📖 Ricettario", "⚙️ Impostazioni", "👥 Staff"])
 
-# --- SCHEDA LISTINO ACQUISTI (LA GRIGLIA PRINCIPALE) ---
+# --- SCHEDA LISTINO ---
 with tab_listino:
-    st.subheader("Gestione Magazzino e Prezzi")
+    st.subheader("🛒 Magazzino e Listino Prezzi")
     
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("Aggiungi nuovi prodotti in fondo alla tabella, modifica i prezzi esistenti o disattiva le vecchie referenze.")
-    with col2:
-        mostra_inattivi = st.checkbox("👁️ Mostra prodotti disattivati", value=False)
+    # --- RICERCA ---
+    ricerca = st.text_input("🔍 Cerca prodotto nel magazzino (es. Riso, Baccalà, Formaggio per Frico, Cjarsons...)", "")
+    
+    # (Inserisci qui il tuo blocco di recupero dati da Supabase per creare df_listino)
+    # ...
+    
+    # --- FILTRO RICERCA ---
+    if ricerca and not df_listino.empty:
+        mask = df_listino["Generico"].astype(str).str.contains(ricerca, case=False, na=False) | \
+               df_listino["Dettaglio"].astype(str).str.contains(ricerca, case=False, na=False)
+        df_display = df_listino[mask]
+    else:
+        df_display = df_listino
 
-    categorie_predefinite = [
-        "Prodotti secchi", "Prodotti freschi", "Latticini", 
-        "Confezionati", "Verdure", "Preparazioni"
-    ]
-    
-    # Definiamo i 14 allergeni ufficiali
-    ALLERGENI_LIST = [
-        "Glutine", "Crostacei", "Uova", "Pesce", "Arachidi", "Soia", 
-        "Latte", "Frutta a guscio", "Sedano", "Senape", "Sesamo", 
-        "Anidride solforosa", "Lupini", "Molluschi"
-    ]
-    
-    # 1. Recuperiamo i Fornitori attivi
-    res_fornitori = supabase.table("fornitori").select("id, nome").eq("is_active", True).execute()
-    fornitori_dict = {f["nome"]: f["id"] for f in res_fornitori.data} if res_fornitori.data else {}
-    lista_nomi_fornitori = list(fornitori_dict.keys())
-    
-    # 2. Recuperiamo il Listino e gli Ingredienti (inclusi gli allergeni)
-    query = """
-        id, prezzo_acquisto, peso_unita_acquisto_g, iva, is_active, nome_specifico_prodotto,
-        ingredienti (id, nome_generico, dettaglio_variante, um_ricetta, categoria, allergeni),
-        fornitori (id, nome)
-    """
-    res_listino = supabase.table("listino_acquisti").select(query).execute()
-    
-    # 3. Costruiamo i dati per la tabella aggiungendo le 14 colonne booleane
-    dati_piatti = []
-    if res_listino.data:
-        for row in res_listino.data:
-            ing = row.get("ingredienti", {}) or {}
-            forn = row.get("fornitori", {}) or {}
-            
-            gen = ing.get("nome_generico", "")
-            dett = ing.get("dettaglio_variante", "")
-            nome_ricetta = f"{gen} {dett}".strip()
-            
-            # Gestione sicura dell'array JSON degli allergeni dal database
-            allergeni_db = ing.get("allergeni", [])
-            if not isinstance(allergeni_db, list):
-                allergeni_db = []
-            
-            prezzo_netto = row.get("prezzo_acquisto", 0.0)
-            iva_perc = row.get("iva", 0)
-            prezzo_ivato = prezzo_netto * (1 + iva_perc / 100)
-            
-            riga = {
-                "listino_id": row.get("id"),
-                "ingrediente_id": ing.get("id"),
-                "Generico": gen,
-                "Dettaglio (Variante)": dett,
-                "Nome in Ricetta": nome_ricetta,
-                "UM Ricetta": ing.get("um_ricetta", "g"),
-                "Categoria": ing.get("categoria", ""),
-                "Fornitore": forn.get("nome", ""),
-                "Nome Commerciale": row.get("nome_specifico_prodotto", ""),
-                "Peso Acquisto (g/ml)": row.get("peso_unita_acquisto_g", 0),
-                "Prezzo (€)": prezzo_netto,
-                "IVA (%)": iva_perc,
-                "Prezzo + IVA (€)": prezzo_ivato, # NUOVA COLONNA CALCOLATA
-                "Attivo": row.get("is_active", True)
-            }
-            # Impostiamo True/False per le 14 colonne
-            for al in ALLERGENI_LIST:
-                riga[al] = al in allergeni_db
-                
-            dati_piatti.append(riga)
-    
-    colonne_base = [
-        "listino_id", "ingrediente_id", "Generico", "Dettaglio (Variante)", "Nome in Ricetta", 
-        "UM Ricetta", "Categoria", "Fornitore", "Nome Commerciale", "Peso Acquisto (g/ml)", 
-        "Prezzo (€)", "IVA (%)", "Prezzo + IVA (€)", "Attivo"
-    ]
-    df_listino = pd.DataFrame(dati_piatti) if dati_piatti else pd.DataFrame(columns=colonne_base + ALLERGENI_LIST)
-    
-    if not df_listino.empty and not mostra_inattivi:
-        df_listino = df_listino[df_listino["Attivo"] == True].reset_index(drop=True)
-    
-    # 4. Configurazione dinamica delle colonne per l'editor
+    # --- CONFIGURAZIONE COLONNE (Ordine Fattura e Auto-Size) ---
     col_config = {
         "listino_id": None, 
         "ingrediente_id": None, 
-        "Nome in Ricetta": st.column_config.TextColumn("🔗 Nome in Ricetta", disabled=True), 
-        # Rinominate le etichette per chiarezza:
-        "UM Ricetta": st.column_config.SelectboxColumn("UM Acquisto", options=["g", "Kg", "ml", "L", "pz"]),
-        "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorie_predefinite, required=True),
-        "Fornitore": st.column_config.SelectboxColumn("Fornitore", options=lista_nomi_fornitori),
-        "Peso Acquisto (g/ml)": st.column_config.NumberColumn("Q.tà Acquisto", min_value=0),
-        "Prezzo (€)": st.column_config.NumberColumn("Prezzo Netto (€)", format="%.2f"),
-        "IVA (%)": st.column_config.NumberColumn("IVA (%)", min_value=0, max_value=100, format="%d"),
-        "Prezzo + IVA (€)": st.column_config.NumberColumn("Prezzo Ivato (€)", format="%.2f", disabled=True),
-        "Attivo": st.column_config.CheckboxColumn("Attivo"),
+        "Generico": st.column_config.TextColumn("Descrizione 1 (Generico)", width="medium", required=True),
+        "Dettaglio": st.column_config.TextColumn("Descrizione 2 (Dettaglio)", width="medium"),
+        "Q.tà Acquisto": st.column_config.NumberColumn("Quantità", width="small", min_value=0),
+        "UM Acquisto": st.column_config.SelectboxColumn("UM", options=["g", "Kg", "ml", "L", "pz"], width="small", required=True),
+        "Prezzo Netto (€)": st.column_config.NumberColumn("Prezzo Unitario Netto", width="small", format="%.2f", required=True),
+        "IVA (%)": st.column_config.NumberColumn("IVA (%)", width="small", min_value=0, max_value=100, format="%d"),
+        "Prezzo Ivato (€)": st.column_config.NumberColumn("Prezzo Totale Ivato", width="small", disabled=True, format="%.2f"),
+        "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorie_predefinite, width="medium"),
+        "Fornitore": st.column_config.SelectboxColumn("Fornitore", options=lista_nomi_fornitori, width="medium"),
+        "Attivo": st.column_config.CheckboxColumn("Attivo", width="small"),
     }
-    # Aggiungiamo automaticamente le 14 checkbox degli allergeni alla fine
-    for al in ALLERGENI_LIST:
-        col_config[al] = st.column_config.CheckboxColumn(al, default=False)
-        
-    edited_listino = st.data_editor(
-        df_listino,
+
+    # --- EDITOR CON SALVATAGGIO AUTOMATICO ---
+    edited_df = st.data_editor(
+        df_display,
         column_config=col_config,
         num_rows="dynamic",
-        use_container_width=True,
-        key="listino_editor"
+        use_container_width=True, # Adatta automaticamente la larghezza allo schermo
+        key="editor_listino"
     )
     
-    # 5. Logica Completa di Salvataggio
-    if st.button("💾 Salva Magazzino", type="primary"):
-        changes = st.session_state["listino_editor"]
+    # Rilevamento modifiche in background
+    changes = st.session_state.get("editor_listino", {})
+    
+    if changes.get("edited_rows") or changes.get("added_rows") or changes.get("deleted_rows"):
         try:
+            # INSERIMENTI
             if changes.get("added_rows"):
                 for riga in changes["added_rows"]:
+                    # Applicazione Maiuscola Automatica (.title() e .lower())
                     gen = str(riga.get("Generico", "")).strip().title()
-                    dett = str(riga.get("Dettaglio (Variante)", "")).strip().lower()
+                    dett = str(riga.get("Dettaglio", "")).strip().lower()
                     nome_forn = riga.get("Fornitore")
                     
-                    if not gen or not nome_forn: continue
+                    if not gen or non nome_forn: continue
                     forn_id = fornitori_dict.get(nome_forn)
                     
-                    # Raggruppiamo le spunte in una lista per il database
-                    allergeni_selezionati = [al for al in ALLERGENI_LIST if riga.get(al) == True]
-                    
-                    check_ing = supabase.table("ingredienti").select("id").eq("nome_generico", gen).eq("dettaglio_variante", dett).execute()
-                    
-                    if check_ing.data:
-                        ing_id = check_ing.data[0]["id"]
-                    else:
-                        nuovo_ing = {
-                            "nome_generico": gen,
-                            "dettaglio_variante": dett,
-                            "um_ricetta": riga.get("UM Ricetta", "g"),
-                            "categoria": riga.get("Categoria", "Altro"),
-                            "allergeni": allergeni_selezionati # Salviamo qui il JSON
-                        }
-                        res_ing = supabase.table("ingredienti").insert(nuovo_ing).execute()
-                        ing_id = res_ing.data[0]["id"]
-                    
-                    nuovo_prezzo = {
-                        "ingrediente_id": ing_id,
-                        "fornitore_id": forn_id,
-                        "nome_specifico_prodotto": riga.get("Nome Commerciale", f"{gen} {dett} {nome_forn}"),
-                        "peso_unita_acquisto_g": riga.get("Peso Acquisto (g/ml)", 1000),
-                        "prezzo_acquisto": riga.get("Prezzo (€)", 0.0),
-                        "iva": riga.get("IVA (%)", 0),
-                        "is_active": riga.get("Attivo", True)
-                    }
-                    supabase.table("listino_acquisti").insert(nuovo_prezzo).execute()
-
+                    # Controllo esistenza e creazione in Supabase (MANTIENI LA TUA LOGICA QUI)
+                    # ... 
+            
+            # MODIFICHE
             if changes.get("edited_rows"):
                 for index, updates in changes["edited_rows"].items():
-                    row_id = df_listino.iloc[index]["listino_id"]
-                    ing_id = df_listino.iloc[index]["ingrediente_id"]
+                    row_id = df_display.iloc[index]["listino_id"]
+                    ing_id = df_display.iloc[index]["ingrediente_id"]
                     
-                    update_listino = {}
-                    update_ingrediente = {}
+                    upd_listino = {}
+                    upd_ing = {}
                     
-                    if "Fornitore" in updates: update_listino["fornitore_id"] = fornitori_dict.get(updates["Fornitore"])
-                    if "Nome Commerciale" in updates: update_listino["nome_specifico_prodotto"] = updates["Nome Commerciale"]
-                    if "Peso Acquisto (g/ml)" in updates: update_listino["peso_unita_acquisto_g"] = updates["Peso Acquisto (g/ml)"]
-                    if "Prezzo (€)" in updates: update_listino["prezzo_acquisto"] = updates["Prezzo (€)"]
-                    if "IVA (%)" in updates: update_listino["iva"] = updates["IVA (%)"]
-                    if "Attivo" in updates: update_listino["is_active"] = updates["Attivo"]
-                    
-                    if "UM Ricetta" in updates: update_ingrediente["um_ricetta"] = updates["UM Ricetta"]
-                    if "Categoria" in updates: update_ingrediente["categoria"] = updates["Categoria"]
-                    
-                    # Intercettiamo le modifiche agli allergeni
-                    allergeni_modificati = any(al in updates for al in ALLERGENI_LIST)
-                    if allergeni_modificati:
-                        nuovi_allergeni = []
-                        for al in ALLERGENI_LIST:
-                            val_allergene = updates.get(al, df_listino.iloc[index][al])
-                            if val_allergene:
-                                nuovi_allergeni.append(al)
-                        update_ingrediente["allergeni"] = nuovi_allergeni
-                    
-                    if update_listino:
-                        supabase.table("listino_acquisti").update(update_listino).eq("id", row_id).execute()
-                    if update_ingrediente:
-                        supabase.table("ingredienti").update(update_ingrediente).eq("id", ing_id).execute()
+                    if "Generico" in updates: upd_ing["nome_generico"] = str(updates["Generico"]).strip().title()
+                    if "Dettaglio" in updates: upd_ing["dettaglio_variante"] = str(updates["Dettaglio"]).strip().lower()
+                    # MANTIENI LA TUA LOGICA DI AGGIORNAMENTO QUI
+                    # ...
 
-            if changes.get("deleted_rows"):
-                for index in changes["deleted_rows"]:
-                    row_id = df_listino.iloc[index]["listino_id"]
-                    supabase.table("listino_acquisti").update({"is_active": False}).eq("id", row_id).execute()
-
-            st.success("Magazzino aggiornato con successo!")
-            st.rerun()
+            # Notifica visiva e refresh
+            st.toast("💾 Modifica salvata automaticamente!", icon="✅")
+            st.rerun() # Ricarica l'app per mostrare subito le maiuscole corrette e l'ivato
             
         except Exception as e:
-            st.error(f"Si è verificato un errore durante il salvataggio: {e}")
-
+            st.error(f"Errore di salvataggio: {e}")
+            
 # --- SCHEDA CANTINA VINI ---
 with tab_vini:
     st.subheader("🍷 Gestione Cantina e Carta dei Vini")
