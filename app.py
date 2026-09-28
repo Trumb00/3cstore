@@ -47,12 +47,14 @@ if not user:
                 st.warning("Inserisci email e password per continuare.")
 
 with st.sidebar:
+    # Peschiamo i dati in modo sicuro direttamente dal client Supabase
+    utente_corrente = supabase.auth.get_user().user
+    
     st.write("Utente loggato:")
-    st.markdown(f"**{st.session_state.user.email}**")
+    st.markdown(f"**{utente_corrente.email}**")
     
     if st.button("🚪 Log Out", use_container_width=True):
         supabase.auth.sign_out()
-        st.session_state.user = None
         st.rerun()
 
     st.divider()
