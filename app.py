@@ -32,18 +32,19 @@ if not user:
     tab_login, tab_cucina = st.tabs(["🔐 Accesso Staff", "🍳 Modalità Cucina (Libera)"])
     
     with tab_login:
-        # Inserisci qui il tuo modulo standard per inserire email e password
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
-        # ... logica di login ...
         
-    with tab_cucina:
-        st.info("Questa modalità permette di consultare le ricette senza bisogno di password. I prezzi e le modifiche sono disabilitati.")
-        # Incolla qui esclusivamente la parte del codice che recupera 
-        # le ricette da Supabase e le mostra a schermo, nascondendo 
-        # le colonne dei costi.
-        
-    st.stop() # Ferma l'esecuzione per chi non è loggato
+        if st.button("🚪 Accedi", type="primary", use_container_width=True):
+            if email and password:
+                try:
+                    # Tenta il login su Supabase
+                    supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    st.rerun() # Ricarica l'app e sblocca i contenuti
+                except Exception as e:
+                    st.error(f"Accesso negato. Controlla email e password. ({e})")
+            else:
+                st.warning("Inserisci email e password per continuare.")
 
 with st.sidebar:
     st.write("Utente loggato:")
