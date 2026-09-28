@@ -23,22 +23,27 @@ def init_admin_connection() -> Client:
 supabase_admin = init_admin_connection()
 
 # --- SISTEMA DI LOGIN ---
-if "user" not in st.session_state:
-    st.session_state.user = None
+user = supabase.auth.get_user()
 
-if not st.session_state.user:
-    st.title("🔒 Accesso Richiesto")
-    with st.form("login_form"):
+if not user:
+    # L'utente NON è loggato. Invece di bloccare tutto, diamo due opzioni:
+    st.title("Gestionale Osteria")
+    
+    tab_login, tab_cucina = st.tabs(["🔐 Accesso Staff", "🍳 Modalità Cucina (Libera)"])
+    
+    with tab_login:
+        # Inserisci qui il tuo modulo standard per inserire email e password
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
-        if st.form_submit_button("Log In"):
-            try:
-                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                st.session_state.user = res.user
-                st.rerun()
-            except Exception as e:
-                st.error("Credenziali errate.")
-    st.stop()
+        # ... logica di login ...
+        
+    with tab_cucina:
+        st.info("Questa modalità permette di consultare le ricette senza bisogno di password. I prezzi e le modifiche sono disabilitati.")
+        # Incolla qui esclusivamente la parte del codice che recupera 
+        # le ricette da Supabase e le mostra a schermo, nascondendo 
+        # le colonne dei costi.
+        
+    st.stop() # Ferma l'esecuzione per chi non è loggato
 
 with st.sidebar:
     st.write("Utente loggato:")
