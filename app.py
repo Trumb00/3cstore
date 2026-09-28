@@ -89,13 +89,58 @@ tab_listino, tab_vini, tab_fornitori, tab_ricettario, tab_impostazioni, tab_staf
 with tab_listino:
     st.subheader("🛒 Magazzino e Listino Prezzi")
     
-    # --- RICERCA ---
+    # 1. RECUPERO DATI DA SUPABASE
+    # Fornitori per i menu a tendina
+    res_forn = supabase.table("fornitori").select("id, nome").eq("is_active", True).execute()
+    fornitori_dict = {f["nome"]: f["id"] for f in res_forn.data} if res_forn.data else {}
+    lista_nomi_fornitori = [None] + list(fornitori_dict.keys())
+    categorie_predefinite = ["Latticini", "Carne", "Pesce", "Verdura", "Prodotti secchi", "Preparazioni", "Altro"]
+    
+    # Listino e Ingredienti (Escludiamo i vini)
+    query_listino = """
+        id, prezzo_acquisto, peso_unita_acquisto_g, iva, is_active,
+        ingredienti!inner (id, nome_generico, dettaglio_variante, um_ricetta, categoria),
+        fornitori (id, nome)
+    """
+    res_listino = supabase.table("listino_acquisti").select(query_listino).eq("ingredienti.is_wine", False).execute()
+    
+    dati_listino = []
+    if res_listino.data:
+        for row in res_listino.data:
+            ing = row.get("ingredienti", {}) or {}
+            forn = row.get("fornitori", {}) or {}
+            
+            prezzo_netto = float(row.get("prezzo_acquisto", 0.0))
+            iva_perc = float(row.get("iva", 0))
+            prezzo_ivato = prezzo_netto * (1 + iva_perc / 100)
+            
+            dati_listino.append({
+                "listino_id": row.get("id"),
+                "ingrediente_id": ing.get("id"),
+                "Generico": ing.get("nome_generico", ""),
+                "Dettaglio": ing.get("dettaglio_variante", ""),
+                "Q.tà Acquisto": float(row.get("peso_unita_acquisto_g", 0)),
+                "UM Acquisto": ing.get("um_ricetta", "g"),
+                "Prezzo Netto (€)": prezzo_netto,
+                "IVA (%)": iva_perc,
+                "Prezzo Ivato (€)": prezzo_ivato,
+                "Categoria": ing.get("categoria", ""),
+                "Fornitore": forn.get("nome", ""),
+                "Attivo": row.get("is_active", True)
+            })
+            
+    import pandas as pd
+    if dati_listino:
+        df_listino = pd.DataFrame(dati_listino)
+    else:
+        df_listino = pd.DataFrame(columns=[
+            "listino_id", "ingrediente_id", "Generico", "Dettaglio", "Q.tà Acquisto", 
+            "UM Acquisto", "Prezzo Netto (€)", "IVA (%)", "Prezzo Ivato (€)", "Categoria", "Fornitore", "Attivo"
+        ])
+
+    # 2. BARRA DI RICERCA E FILTRO
     ricerca = st.text_input("🔍 Cerca prodotto nel magazzino (es. Riso, Baccalà, Formaggio per Frico, Cjarsons...)", "")
     
-    # (Inserisci qui il tuo blocco di recupero dati da Supabase per creare df_listino)
-    # ...
-    
-    # --- FILTRO RICERCA ---
     if ricerca and not df_listino.empty:
         mask = df_listino["Generico"].astype(str).str.contains(ricerca, case=False, na=False) | \
                df_listino["Dettaglio"].astype(str).str.contains(ricerca, case=False, na=False)
