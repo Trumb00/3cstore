@@ -76,7 +76,7 @@ with st.sidebar:
 # Da inserire SUBITO DOPO il blocco del Login e prima di st.title
 ruolo_utente = "visitatore" # Default
 if user:
-    res_ruolo = supabase.table("ruoli_utenti").select("ruolo").eq("user_id", st.session_state.user.id).execute()
+    res_ruolo = supabase.table("ruoli_utenti").select("ruolo").eq("user_id", user.user.id).execute()
     if res_ruolo.data:
         ruolo_utente = res_ruolo.data[0]["ruolo"]
 
